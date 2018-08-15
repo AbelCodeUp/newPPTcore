@@ -1,0 +1,1264 @@
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Talk-Cloud Example</title>
+    <script type="text/javascript" src="../sdk/jquery.min.js?222"></script>
+
+    <script type="text/javascript" src="../../lib/socket.io.js?222"></script>
+    <script type="text/javascript" src="../../lib/adp.js?222"></script>
+    <script type="text/javascript" src="../../src/utils/L.Logger.js?222"></script>
+    <script type="text/javascript" src="../../src/utils/L.Base64.js?222"></script>
+    <script type="text/javascript" src="../../src/utils/L.Constant.js?222"></script>
+    <script type="text/javascript" src="../../src/utils/L.Utils.js?222"></script>
+    <script type="text/javascript" src="../../src/utils/StatusCode.js?222"></script>
+
+    <script type="text/javascript" src="../../src/webrtc-stacks/ChromeStableStack.js?99"></script>
+
+    <script type="text/javascript" src="../../src/AVMgr.js?222333"></script>
+    <script type="text/javascript" src="../../src/RoomUser.js?222"></script>
+    <script type="text/javascript" src="../../src/Room.js?232"></script>
+    <script type="text/javascript" src="../../src/Events.js?22232"></script>
+    <script type="text/javascript" src="../../src/Connection.js?611"></script>
+    <script type="text/javascript" src="../../src/Stream.js?222333"></script>
+
+    <script type="text/javascript" src="../../src/views/VideoPlayer.js?222"></script>
+
+    <script type="text/javascript" src="../../src/NativeStream.js?222333"></script>
+    <script type="text/javascript" src="../../src/NativeAVMgr.js?222333"></script>
+    <script type="text/javascript" src="../../src/NativeProxy.js?222333"></script>
+    <script type="text/javascript" src="../../src/webrtc-stacks/NativePeerConnection.js?222"></script>
+    <script type="text/javascript" src="../../src/webrtc-stacks/NativeStack.js?222"></script>
+    <script type="text/javascript" src="../../src/views/NativeVideoPlayer.js?222"></script>
+
+
+    <!--<script type="text/javascript" src="../sdk/tksdk.js?222"></script>-->
+</head>
+
+<body style="width: 100%;margin: 0;height: 100%;">
+
+<script type="text/javascript">
+    function theElement(id) {
+        return document.getElementById(id);
+    }
+
+    // 服务器地址
+    var _hostName = "global.talk-cloud.neiwang";
+    // 房间号。请登录http://global.talk-cloud.net/User/login.html创建房间，将创建好的房间号赋值给此变量
+    var _roomSerial = '1649794955';
+    // 房间密码。将房间对应的密码赋值给此变量
+    var _roomPassword = '';
+
+    var _room = TK.Room();  // 房间管理对象
+    var _usingDevices = {} ; // 当前使用的设备集合
+    var _deviceDetectioning = false ; // 是否正在设备检测中
+    var _devices = {}; // 设备列表，存储系统中所有媒体设备
+    var _audioInputDevices = {}; // 音频输入设备列表
+    var _videoInputDevices = {}; // 视频输入设备列表
+    var _audioOutputDevices = {}; // 音频输出设备列表
+    var _selectedDevices = {};  // 当前选中的设备集合
+    var _isDebugLog = false; //是否是debug级别日志
+    var _native = undefined; // 原生接口类对象
+    var _nativeInterfaceAvailable = false; // 原生接口是否可用
+    var _watchingLocalVideo = false;
+    var OperationState = {
+        Stopped: '_STOPPED_',
+        Started: '_STARTED_',
+        Paused: '_PAUSED_',
+    };
+    var RecordType = {
+        Screen: '_SCREEN_',
+        Audio: '_AUIDO_',
+    };
+    var _shareMediaFileState = OperationState.Stopped; // 共享本地媒体文件状态
+    var _localRecordState = OperationState.Stopped; // 本地录制状态
+    var _localRecordType = RecordType.Screen; // 本地录制类型（屏幕/音频）
+    var _serverRecordState = OperationState.Stopped; // 服务器录制状态
+    var _mediaFileInfo = {
+        duration: 0,
+        position: 0,
+        seeking: false,
+    };
+    var _isRoomOnlyAudio = false; // 房间是否只有音频
+    var _originalVideoProfile = {}; // 原始视频属性
+    var _videoMirror = false;
+    var _videoLoader = true;
+    var _videoMode = TK_VIDEO_MODE.ASPECT_RATIO_CONTAIN; // 视频显示模式
+    var _shareScreening = false ; //是否正在共享屏幕
+
+    _room.setLogIsDebug(_isDebugLog) ;
+
+    // 房间连接成功
+    _room.addEventListener("room-connected", function (roomEvent) {
+        TK.Logger.info('room-connected', roomEvent);
+
+        for (var userId in _room.getUsers()) {
+            var user = _room.getUser(userId);
+            printRecvMsg('用户 ' + user.nickname + '已在房间中。用户信息:'+JSON.stringify(user));    
+        }
+
+        for (var msg in roomEvent.message) {
+            printRecvMsg('房间中已发布的自定义消息:'+JSON.stringify(roomEvent.message[msg]));    
+        }
+
+        var idArr = ['joinRoom'];
+        setElementDisable(idArr,true);
+        setElementDisable(undefined, true, 'nativectrlelementgroup');
+
+        _room.getVideoProfile(function(profile) {
+            TK.Logger.info('room video profile: ', profile);
+            _originalVideoProfile = profile;
+        });
+
+        _room.setAutoProcessDeviceChangeEvent(true);
+
+        if (!theElement('myVideo')) {
+            var div = document.createElement('div');
+            div.setAttribute('style', 'position: relative;width: 360px; height: 240px; float:left;border:1px solid red;');
+            div.setAttribute('id', 'myVideo');
+            theElement('videoContainer').appendChild(div);
+        }
+               
+        // 播放本地视频
+        _room.playVideo(_room.getMySelf().id, 'myVideo', {mirror: _videoMirror, loader: _videoLoader, mode: _videoMode}, function(err) {
+            TK.Logger.error("play video error: ", err);
+        });
+
+        _watchingLocalVideo = true;
+        theElement('previewvideo').innerHTML = 'close';
+
+        var options = {
+            video:true ,
+            audio:true
+        };
+        _createPublishBtns( theElement('myVideo'), true);
+        _createPlayButtons( theElement('myVideo') , true ,_room.getMySelf().id , options);
+        _createNameLabel(theElement('myVideo') , true ,_room.getMySelf().id);
+        if( _room.getMySelf() &&  _room.getMySelf().updatePublishButtonsState){
+            _room.getMySelf().updatePublishButtonsState ( _room.getMySelf() );
+        }
+        if( _room.getMySelf() &&  _room.getMySelf().updatePlayAVButton){
+            _room.getMySelf().updatePlayAVButton ( _room.getMySelf() );
+        } 
+
+        for(var key in _room.getUsers()){
+            var user = _room.getUsers()[key];
+            if(user.updatePublishButtonsState){
+                user.updatePublishButtonsState(user);
+            }
+            if(user.updatePlayAVButton){
+                user.updatePlayAVButton(user);
+            }
+        }
+
+        _room.registerAudioVolumeListener(_room.getMySelf().id, 50, function(vol, userId) {
+            var user = _room.getUser(userId);
+            if (user !== undefined && user.updateAudioVolume !== undefined && typeof user.updateAudioVolume === 'function')
+                user.updateAudioVolume(vol);
+        }, function(err, userId) {
+            TK.Logger.error('registerAudioVolumeListener error', err);
+        });
+    });
+
+    // 房间连接失败
+    _room.addEventListener("room-error", function(roomEvent) {
+        TK.Logger.error("join room error: ", roomEvent);
+        alert('join room error');
+    });    
+
+    // 离开房间成功
+    _room.addEventListener('room-leaveroom', function (roomEvent){
+        TK.Logger.debug('room-leaveroom' , roomEvent);
+        var idArr = ['joinRoom', 'videomirror', 'videoloader', 'videomode'];
+        setElementDisable(idArr,false);
+        setElementDisable(undefined, false, 'nativectrlelementgroup');
+
+        //_room.unplayVideo('');
+
+        _room.unregisterAudioVolumeListener(_room.getMySelf().id);
+
+        clearView();
+    });
+
+    // 用户加入房间
+    _room.addEventListener("room-participant_join", function(roomEvent) {
+        TK.Logger.debug('participant_join', roomEvent);
+        printRecvMsg('用户加入房间 , 用户info:'+JSON.stringify(roomEvent.user));
+    });
+
+    // 用户离开房间
+    _room.addEventListener("room-participant_leave", function(roomEvent) {
+        TK.Logger.debug('participant_leave', roomEvent);
+        _room.unplayAudio(roomEvent.user.id);
+        _room.unplayVideo(roomEvent.user.id);
+        var elementID =  'test' + roomEvent.user.id;
+        var element = theElement(elementID);
+        if(element){
+            theElement('videoContainer').removeChild(element);
+        } 
+        printRecvMsg('用户离开房间 , 用户info:'+JSON.stringify(roomEvent.user));
+    });
+
+    // 用户被请出房间
+    _room.addEventListener("room-participant_evicted", function(roomEvent) {
+        TK.Logger.debug('room-participant_evicted', roomEvent);
+        if (roomEvent.user.id === _room.getMySelf().id) {
+             clearView();
+        }
+        printRecvMsg('用户被踢出房间 , 用户info:'+JSON.stringify(roomEvent.user));
+    });
+
+    // 用户属性改变
+    _room.addEventListener("room-userproperty-changed", function(roomEvent) {
+        TK.Logger.debug('room-userproperty-changed', roomEvent);
+        var changePropertyJson = roomEvent.message ;
+        if(changePropertyJson.publishstate !== undefined){
+            var user = roomEvent.user ;
+            if(user && user.updatePublishButtonsState){
+                user.updatePublishButtonsState(user);
+            }
+            if(user && user.updatePlayAVButton){
+                user.updatePlayAVButton(user);
+            }
+        }else if(changePropertyJson.customProperties !== undefined){
+            printRecvMsg(  '收到用户属性改变,数据json:'+JSON.stringify( changePropertyJson ) + ' , user id is '+ roomEvent.userid );
+        }
+    });
+
+    // 房间有消息发布
+    _room.addEventListener("room-pubmsg", function(roomEvent) {
+        TK.Logger.debug('room-pubmsg', roomEvent);
+        var messages = roomEvent.message ;
+        if(messages.name === 'TestPubmsg'){
+            printRecvMsg('收到pubMsg,数据json:'+JSON.stringify(messages) );
+        }
+    });
+
+    // 房间有消息被删除
+    _room.addEventListener("room-delmsg", function(roomEvent) {
+        TK.Logger.debug('room-delmsg', roomEvent);
+        var messages = roomEvent.message ;
+        if(messages.name === 'TestPubmsg'){
+            printRecvMsg('收到delMsg,数据json:'+JSON.stringify(messages) );
+        }
+    });
+
+    // 用户音频状态改变
+    _room.addEventListener("room-useraudiostate-changed", function(evt) {
+        TK.Logger.info('room-useraudiostate-changed', evt.message);
+        if (evt.message.userId === _room.getMySelf().id) return;
+        if (evt.message.published) {
+            // 若对于同一userId，既调用playVideo又调用playAudio，那么调用两个方法时elementId必须相同
+            // 先检查element是否存在，若不存在，创建；存在，直接使用
+            var div = theElement('test' + evt.message.userId);
+            if (!div) {
+                div = document.createElement('div');
+                div.setAttribute('style', 'position: relative;width: 360px; height: 240px;float:left;border:1px solid red;');
+                div.setAttribute('id', 'test' + evt.message.userId);
+                theElement('videoContainer').appendChild(div);
+            }
+
+            _room.playAudio(evt.message.userId, div.id);
+        }
+        else {
+            _room.unplayAudio(evt.message.userId);
+            var publishState = _room.getUser(evt.message.userId).publishstate;
+            // 检查用户发布状态，若没有发布，则删除element
+            if (publishState === TK.PUBLISH_STATE_NONE) {
+                var elementID =  'test' + evt.message.userId;
+                var element = theElement(elementID);
+                if(element){
+                    theElement('videoContainer').removeChild(element);
+                }    
+            }
+        }
+    });
+
+    //屏幕共享状态改变
+    _room.addEventListener("room-userscreenstate-changed", function(evt) {
+        TK.Logger.info('room-uservideostate-changed', evt.message);
+        if (evt.message.userId === _room.getMySelf().id) return;
+        if (evt.message.published) {
+            var div = theElement('screen' + evt.message.userId);
+            if (!div) {
+                div = document.createElement('div');
+                div.setAttribute('style', 'position: relative;width: 360px; height: 240px;float:left;border:1px solid red;');
+                div.setAttribute('id', 'screen' + evt.message.userId);
+                theElement('videoContainer').appendChild(div);
+            }
+            _room.playRemoteScreen(evt.message.userId, div.id);
+        }else{
+            _room.unplayRemoteScreen(evt.message.userId);
+            var elementID =  'screen' + evt.message.userId;
+            var element = theElement(elementID);
+            if(element){
+                theElement('videoContainer').removeChild(element);
+            }
+        }
+    });
+
+    // 用户视频状态改变
+    _room.addEventListener("room-uservideostate-changed", function(evt) {
+        TK.Logger.info('room-uservideostate-changed', evt.message);
+        if (evt.message.userId === _room.getMySelf().id) return;
+        if (evt.message.published) {
+            // 若对于同一userId，既调用playVideo又调用playAudio，那么调用两个方法时elementId必须相同
+            // 先检查element是否存在，若不存在，创建；存在，直接使用
+            var div = theElement('test' + evt.message.userId);
+            if (!div) {
+                div = document.createElement('div');
+                div.setAttribute('style', 'position: relative;width: 360px; height: 240px;float:left;border:1px solid red;');
+                div.setAttribute('id', 'test' + evt.message.userId);
+                theElement('videoContainer').appendChild(div);                
+            }
+
+            _room.playVideo(evt.message.userId, div.id, {mirror: _videoMirror, loader: _videoLoader, mode: _videoMode});
+
+            var options = {
+                video:true ,
+                audio:true, // 暂时假设音频已发布
+            }; 
+
+            // 重复创建了
+            _createPlayButtons(div , false , evt.message.userId, options);
+            _createNameLabel(div , false , evt.message.userId);
+            // 理论上应该放在音频发布的地方注册监听
+            // 但由于显示音量的div在这里创建，所以放在这里注册监听
+            _room.registerAudioVolumeListener(evt.message.userId, 50, function(vol, userId) {
+                var user = _room.getUser(userId);
+                if (user !== undefined && user.updateAudioVolume !== undefined && typeof user.updateAudioVolume === 'function')
+                    user.updateAudioVolume(vol);
+            });           
+        }
+        else {
+            _room.unplayVideo(evt.message.userId);
+            var publishState = _room.getUser(evt.message.userId).publishstate;
+            // 检查用户发布状态，若没有发布，则删除element
+             if (publishState === TK.PUBLISH_STATE_NONE) {
+                var elementID =  'test' + evt.message.userId;
+                var element = theElement(elementID);
+                if(element){
+                    theElement('videoContainer').removeChild(element);
+                }
+            }
+
+             _room.unregisterAudioVolumeListener(evt.message.userId);
+        }
+    });
+
+    // 用户共享本地媒体文件
+    _room.addEventListener('room-userfilestate-changed', function(evt) {
+        TK.Logger.info('room-userfilestate-changed' , evt);
+        if (evt.message.published) {
+            var div = theElement('test' + evt.message.userId + ':file');
+            if (!div) {
+                div = document.createElement('div');
+                div.setAttribute('style', 'position: relative;width: 320px; height: 240px;float:left;border:1px solid red;');
+                div.setAttribute('id', 'test' + evt.message.userId + ':file');
+                theElement('videoContainer').appendChild(div);
+                
+            }
+
+            _room.playRemoteMediaFile(evt.message.userId, div.id);         
+        }
+        else {
+            _room.unplayRemoteMediaFile(evt.message.userId);
+            var eid = 'test' + evt.message.userId + ':file';
+            var div = theElement(eid);
+            if(div){
+                theElement('videoContainer').removeChild(div);
+            }
+        }
+    });
+
+    // 接收聊天消息的事件
+    _room.addEventListener('room-text-message', function (roomEvent){
+        TK.Logger.debug('room-text-message' , roomEvent);
+        var msg =  roomEvent.message.msg ;
+        var user = _room.getUsers()[roomEvent.userid] ;
+        printRecvMsg(  '用户【'+ user.nickname +(roomEvent.userid === _room.getMySelf().id ? '(me)':'')+'】' +'说:'+msg );
+    });
+
+    // 房间音视频状态切换
+    _room.addEventListener('room-audiovideostate-switched', function(evt) {
+        TK.Logger.info('room-audiovideostate-switched', evt);
+        if (evt.message.onlyAudio === true) {
+            theElement('audioroom').value = '切换为音视频教室';
+            _isRoomOnlyAudio = true;
+        } else {
+            theElement('audioroom').value = '切换为纯音频教室';
+            _isRoomOnlyAudio = false;
+        }
+    });
+
+    _room.addEventListener('access-accepted', function(evt) {
+        TK.Logger.info('access-accepted', evt);
+    });
+
+    _room.addEventListener('access-denied', function(evt) {
+        TK.Logger.error('access-denied', evt);
+    });
+
+    _room.addEventListener('device-not-available', function(evt) {
+        TK.Logger.error('device-not-available', evt);
+    });
+
+    _room.addEventListener('device-failure', function(evt) {
+        TK.Logger.error('device-failure', evt);
+        var reasonStr;
+        if (evt.code === TK_ERR.DEVICE_ERROR_NotAllowedError) {
+            reasonStr = '设备权限已禁用';
+        } else if (evt.code === TK_ERR.DEVICE_ERROR_NotFoundError) {
+            reasonStr = '未发现设备';
+        } else {
+            reasonStr = '未知';
+        }
+        if (evt.message.kind === 'audioinput') {
+            printRecvMsg('ERROR---无可用音频输入设备，原因：' + reasonStr);
+        } else if (evt.message.kind === 'videoinput') {
+            printRecvMsg('ERROR---无可用视频输入设备，原因：' + reasonStr);
+        }
+    });
+    var isAiDevSuc = false;
+    var isViDevSuc = false;
+    _room.addEventListener('device-success', function(evt) {
+        TK.Logger.info('device-success', evt);
+        if (evt.message.kind === 'audioinput') {
+            printRecvMsg('检测到可用音频输入设备');
+        } else if (evt.message.kind === 'videoinput') {
+            printRecvMsg('检测到可用视频输入设备');
+        }
+    });
+
+    //发布自定义消息
+    function pubmsg() {
+        var pubmsgParams = {
+            msgName:'TestPubmsg' ,
+            msgId:'TestPubmsgId' ,
+            toId:'__all' ,
+            data:{info:'测试pubMsg'} ,
+            save:true ,
+        };
+        _room.pubMsg(pubmsgParams);
+    }
+
+    //删除自定义消息
+    function delmsg() {
+        var delmsgParams = {
+            msgName:'TestPubmsg' ,
+            msgId:'TestPubmsgId' ,
+            toId:'__all' ,
+            data:{} ,
+        };
+        _room.delMsg(delmsgParams);
+    }
+
+    //改变用户属性
+    function changeproperty() {
+        _room.changeUserProperty(_room.getMySelf().id, '__all', { 'customProperties': 'customProperties_'+new Date().getTime()+'_change'});
+    }
+
+    // 切换房间音视频状态
+    function changeAudioRoom() {
+        if (_isRoomOnlyAudio)
+            _room.switchOnlyAudioRoom(false);
+        else
+            _room.switchOnlyAudioRoom(true);
+    }
+
+    //将用户踢出房间
+    function evict() {
+        var users = _room.getUsers();
+        TK.Logger.debug('evict1', users);
+        if (users === undefined)
+            return;
+
+        for(var key in users){
+            TK.Logger.debug('evict2', key);
+            if (key !== _room.getMySelf().id ) {
+                _room.evictUser(key);
+                return;
+            }
+        }
+    }
+
+    //枚举设备
+    function enumerateDevices(  ){
+        var paramsJson = {isSetlocalStorage: false} ;
+        TK.DeviceMgr.getDevices(function (deviceInfo) {
+            data = {
+                action:'deviceManagement' ,
+                type:'sendDeviceInfo' ,
+                deviceData:{deviceInfo:deviceInfo} ,
+            };
+            _devices = deviceInfo.devices;
+            _audioInputDevices = _devices.audioinput;
+            _videoInputDevices = _devices.videoinput;
+            _audioOutputDevices = _devices.audiooutput;
+            var videoinputSelectItem = theElement('selectVideoInputDevices');
+            videoinputSelectItem.innerHTML = '';
+            _usingDevices.videoinput = deviceInfo.useDevices.videoinput ;
+            _usingDevices.audioinput = deviceInfo.useDevices.audioinput ;
+            _usingDevices.audiooutput = deviceInfo.useDevices.audiooutput  ;
+
+            for(var i=0;i<_videoInputDevices.length;i++){
+                var option = new Option(_videoInputDevices[i].label, _videoInputDevices[i].deviceId) ;
+                if(_videoInputDevices[i].deviceId === _usingDevices.videoinput ){
+                    option.selected = true ;
+                }
+                videoinputSelectItem.options.add(option);
+            }
+            var audioinputSelectItem = theElement('selectAudioInputDevices');
+            audioinputSelectItem.innerHTML = '';
+            for(var i=0;i<_audioInputDevices.length;i++){
+                var option = new Option(_audioInputDevices[i].label, _audioInputDevices[i].deviceId) ;
+                if(_audioInputDevices[i].deviceId ===  _usingDevices.audioinput ){
+                    option.selected = true ;
+                }
+                audioinputSelectItem.options.add(option);
+            }
+            var audiooutputSelectItem = theElement('selectAudioOutputDevices');
+            audiooutputSelectItem.innerHTML = '';
+            for(var i=0;i<_audioOutputDevices.length;i++){
+                var option = new Option(_audioOutputDevices[i].label, _audioOutputDevices[i].deviceId) ;
+                if(_audioOutputDevices[i].deviceId === _usingDevices.audiooutput ){
+                    option.selected = true ;
+                }
+                audiooutputSelectItem.options.add(option);
+            }
+            if( _deviceDetectioning ){
+                startDevicesTest();
+            }
+        }, paramsJson);
+    }
+
+    function selectVideoInputDevices(obj){
+        _selectedDevices.videoinput = obj.value;
+
+        var failureCallback = function (err) {
+            TK.Logger.error('selectVideoInputDevices failed, failure info:' , err);
+        };
+
+        TK.DeviceMgr.startCameraTest(_selectedDevices.videoinput, 'deviceDetectionVideoPlayerContainer', failureCallback);
+    }
+
+    function selectAudioInputDevices(obj){
+        _selectedDevices.audioinput = obj.value;
+
+        var successCallback = function (volume) {
+            //TK.Logger.error('mic test', volume);
+            theElement('deviceDetectionAudioPlayerVolume').innerHTML = volume;
+        };
+        var failureCallback = function (err) {
+            TK.Logger.error('selectAudioInputDevices failed, failure info:' , err);
+        };
+
+        TK.DeviceMgr.startMicrophoneTest(_selectedDevices.audioinput, 'deviceDetectionAudioPlayerContainer', successCallback, failureCallback);
+    }
+
+    function selectAudioOutputDevices(obj){
+        _selectedDevices.audiooutput = obj.value;
+        TK.Logger.info('选中的音频输出设备id:'+_selectedDevices.audiooutput);
+
+        if (_nativeInterfaceAvailable) {
+            // do nothing...
+        } else {
+            var setAudiooutputAvElements = [] ; //需要设置扬声器的节点数组
+            var deviceDetectionVideoPlayerAVElements = theElement('deviceDetectionVideoPlayerContainer').querySelectorAll('video,audio') ;
+            var deviceDetectionAudioPlayerAVElements = theElement('deviceDetectionAudioPlayerContainer').querySelectorAll('video,audio') ;
+            var deviceDetectionAudiooutputElement = theElement('deviceDetectionAudiooutput') ;
+            for( var  i = 0 ; i < deviceDetectionVideoPlayerAVElements.length ; i++ ){
+                setAudiooutputAvElements.push( deviceDetectionVideoPlayerAVElements[i] );
+            }
+            for( var  i = 0 ; i < deviceDetectionAudioPlayerAVElements.length ; i++ ){
+                setAudiooutputAvElements.push( deviceDetectionAudioPlayerAVElements[i] );
+            }
+            setAudiooutputAvElements.push( deviceDetectionAudiooutputElement );
+            TK.DeviceMgr.associateElementsToSpeaker( setAudiooutputAvElements, _selectedDevices.audiooutput , function () {
+                    TK.Logger.info('set audiooutput finished!');
+                }
+            );
+        } 
+    }
+
+    function testSpeaker() {
+        if (_nativeInterfaceAvailable) {
+            TK.DeviceMgr.startSpeakerTest(_selectedDevices.audiooutput, 'http://192.168.1.17/bobo/detectionDevice_default.wav', function(err) {
+                TK.Logger.error('speaker test error.', err);
+            });
+        }
+    }
+
+    function finishDevicesTest() {
+        _deviceDetectioning = false ;
+        
+        TK.DeviceMgr.stopCameraTest();
+        TK.DeviceMgr.stopMicrophoneTest();
+        theElement('deviceDetectionAudioPlayerVolume').innerHTML = '0' ;
+        theElement('deviceDetectionBox').style.display = 'none';
+        _usingDevices.videoinput  =  _selectedDevices.videoinput ;
+        _usingDevices.audioinput  =  _selectedDevices.audioinput ;
+        _usingDevices.audiooutput =  _selectedDevices.audiooutput ;
+        if (_nativeInterfaceAvailable) {
+            TK.DeviceMgr.stopSpeakerTest();
+        } else {
+            try{
+                theElement('deviceDetectionAudiooutput').pause();
+            }catch (err){
+                TK.Logger.error( 'deviceDetectionAudiooutput audio element pause error:' , err );
+            }    
+        }
+        
+        setLocalDevices();
+    }
+
+    function stopDevicesTest() {
+        _deviceDetectioning = false ;
+        TK.DeviceMgr.stopCameraTest();
+        TK.DeviceMgr.stopMicrophoneTest();
+
+        _selectedDevices.videoinput =  _usingDevices.videoinput ;
+        _selectedDevices.audioinput =  _usingDevices.audioinput ;
+        _selectedDevices.audiooutput =   _usingDevices.audiooutput ;
+        theElement('deviceDetectionAudioPlayerVolume').innerHTML = 0 ;
+        theElement('deviceDetectionBox').style.display = 'none';
+        if (_nativeInterfaceAvailable) {
+            TK.DeviceMgr.stopSpeakerTest();
+        } else {
+            try{
+                theElement('deviceDetectionAudiooutput').pause();
+            }catch (err){
+                TK.Logger.error( 'deviceDetectionAudiooutput audio element pause error:' , err );
+            }    
+        }
+    }
+
+    function startDevicesTest() {
+        _deviceDetectioning = true ;
+        TK.DeviceMgr.stopCameraTest();
+        TK.DeviceMgr.stopMicrophoneTest();
+
+        theElement('deviceDetectionAudioPlayerVolume').innerHTML = '0';
+        try{
+            theElement('deviceDetectionAudiooutput').pause();
+        }catch (err){
+            TK.Logger.error( 'deviceDetectionAudiooutput audio element pause error:' , err );
+        }
+        
+        _selectedDevices.videoinput = _usingDevices.videoinput;
+        _selectedDevices.audioinput = _usingDevices.audioinput;
+        _selectedDevices.audiooutput = _usingDevices.audiooutput;
+
+        var videoinputSelectItem = theElement('selectVideoInputDevices');
+        for(var i=0; i<videoinputSelectItem.options.length; i++){
+            if(videoinputSelectItem.options[i].value === _usingDevices.videoinput ){
+                videoinputSelectItem.options[i].selected = true ;
+            }
+        }
+        var audioinputSelectItem = theElement('selectAudioInputDevices');
+        for(var i=0; i<audioinputSelectItem.options.length; i++){
+            if(audioinputSelectItem.options[i].value ===  _usingDevices.audioinput ){
+                audioinputSelectItem.options[i].selected = true ;
+            }
+        }
+        var audiooutputSelectItem = theElement('selectAudioOutputDevices');
+        for(var i=0; i<audiooutputSelectItem.options.length; i++){
+            if(audiooutputSelectItem.options[i].value === _usingDevices.audiooutput ){
+                audiooutputSelectItem.options[i].selected = true ;
+            }
+        }
+
+        selectVideoInputDevices({value: _selectedDevices.videoinput });
+        selectAudioInputDevices({value: _selectedDevices.audioinput });
+        selectAudioOutputDevices({value: _selectedDevices.audiooutput });
+        theElement('deviceDetectionBox').style.display = 'block';
+    }
+
+    function setLocalDevices(){
+        var selectDeviceInfo = _selectedDevices;
+        TK.Logger.debug('selectDeviceInfo  ====', selectDeviceInfo);
+        TK.DeviceMgr.setDevices(selectDeviceInfo, function() {
+            TK.Logger.error('set device failed');
+        });
+    }
+
+    //发送消息
+    function sendMsg() {
+        _room.sendMessage(theElement('text').value);
+        theElement('text').value = '';
+    } 
+
+    function leaveRoom() {
+        _room.leaveroom();
+    }
+    function joinRoom() {
+        var host = theElement('webserver').value;
+        var serial = theElement('roomid').value;
+        var password = theElement('password').value;
+        var nick = theElement('nickname').value;
+        if (host === '') {
+            alert('please type web server address...');
+            return;
+        }
+        if (serial === '') {
+            alert('please type room ID...');
+            return;
+        }
+        var myOpt = {
+            class: 'one',
+            grade: 'two',
+        };
+        _room.joinroom(host, 443, nick, '', {serial:serial, password:password}, myOpt);
+    }
+    function setElementDisable(elementIdList,isDisable,group) {
+        if (!group) {
+            group = 'ctrlelementgroup';
+        }
+        var btnEle = theElement(group).querySelectorAll('input');
+        for(var i=0 ; i<btnEle.length ; i++){
+            var value = btnEle[i];
+            if (elementIdList && elementIdList.indexOf(value.id) >= 0) {
+                value.disabled = isDisable;
+            } else {
+                value.disabled = !isDisable;
+            }
+        }
+    };
+    function setElementHide(elementIdList, isHide, group) {
+        if (!group)
+            group = 'nativectrlelementgroup';
+        if (!isHide)
+            isHide = false;
+        var egroup = theElement(group);
+        if (!egroup) return;
+        var inputEle = egroup.querySelectorAll('input');
+        for (var i = inputEle.length - 1; i >= 0; i--) {
+            var ele = inputEle[i];
+            if (elementIdList && elementIdList.indexOf(ele.id) >= 0) {
+                ele.style.display = isHide?'none':'';
+            } else {
+                ele.style.display = isHide?'':'none';
+            }
+        }
+    }
+
+    function onLocalDevicesChanged(evt) {
+        TK.Logger.error('devices changed');
+        enumerateDevices();
+    }
+
+    window.onload = function () {
+        theElement("webserver").value = _hostName;
+        theElement('roomid').value = _roomSerial;
+        theElement('password').value = _roomPassword;
+        var idArr = ['joinRoom', 'webserver', 'roomid', 'password', 'nickname', 'videomirror', 'videoloader', 'videomode'];
+        setElementDisable(idArr,false);
+        if (TK.CheckNativeInterfaceAvailable() === true) {
+            _nativeInterfaceAvailable = true;
+            TK.Initialize(true);
+            _room.init('82AUScqguvqXzhUh');
+            _native = _room.getNativeInterface();
+            setElementDisable(undefined, false, 'nativectrlelementgroup');
+            theElement('deviceDetectionAudiooutput').style.display = 'none';
+            _native.createShareScreenWindow();
+        } else {
+            TK.Initialize(false);
+            _room.init('82AUScqguvqXzhUh');
+            setElementHide(undefined, false, 'nativectrlelementgroup');
+            theElement('testspeaker').style.display = 'none';
+        }
+        TK.Logger.warning('sdk version - ' + TK.getSdkVersion());
+        TK.DeviceMgr.addDeviceChangeListener(onLocalDevicesChanged);
+        enumerateDevices();
+    };
+    //创建昵称、音量标签
+    function _createNameLabel(div , local , userId) {
+        var user =  local ? _room.getMySelf() : _room.getUser(userId);
+        var nameDiv = document.createElement('div');
+        nameDiv.setAttribute('style', 'position: absolute;float:left;z-index:999;bottom:0px;right:0px;color:gold;');
+        nameDiv.setAttribute('id', 'label' + userId);
+        nameDiv.innerHTML = (user ? user.nickname:'unknown')+ (local ?'(me)' : '')  ;
+        div.appendChild(nameDiv);
+
+        var volDiv = document.createElement('div');
+        volDiv.setAttribute('style', 'position: absolute;float:left;z-index:999;bottom:0px;left:0px;color:gold;');
+        volDiv.innerHTML = 'vol: 0';
+        div.appendChild(volDiv);
+
+        if(user){
+            user.updateAudioVolume = function (vol) {
+                volDiv.innerHTML = 'vol: ' + vol;
+            };
+        }
+    };
+    // 创建播放按钮
+    function _createPlayButtons(parentDiv , local , userId , options){
+        options = options || {audio:false , video:false} ;
+        var buttonAV = document.createElement('button');
+        var buttonAudio = document.createElement('button');
+        var buttonVidio = document.createElement('button');
+        var streamUserid = userId;
+        buttonAV.setAttribute('style', 'position: absolute;float:left;border:1px solid;z-index:999;top:0px;');
+        buttonAV.setAttribute('id', 'buttonAV' + userId);
+        buttonAV.innerHTML = ( options.video && options.audio ?'停止音视频':'播放音视频');
+        buttonAV.onclick = function () {
+            if(buttonAV.innerHTML === '播放音视频'){
+                TK.Logger.info( 'play [audio and video]. elementId is '+(local?'myVideo':'test' + userId) );
+                options.video = true ;
+                options.audio = true ;;
+                _room.playAudio(userId, local?'myVideo':'test' + userId);
+                _room.playVideo(userId, local?'myVideo':'test' + userId, {mirror: _videoMirror, loader: _videoLoader, mode: _videoMode});
+                if (local) {
+                    _watchingLocalVideo = true;
+                    theElement('previewvideo').innerHTML = 'close';
+                }
+                TK.Logger.info('play audio and video');
+            }else{
+                TK.Logger.info( 'unplay [audio and video]. elementId is '+(local?'myVideo':'test' + userId) );
+                options.video = false ;
+                options.audio = false ;
+                _room.unplayAudio(userId);
+                _room.unplayVideo(userId);
+                if (local) {
+                    _watchingLocalVideo = false;
+                    theElement('previewvideo').innerHTML = 'preview';
+                }
+                TK.Logger.info('un-play audio and video');
+            }
+            buttonAV.innerHTML = ( options.video && options.audio ?'停止音视频':'播放音视频') ;
+            buttonAudio.innerHTML = ( options.audio ?'停止音频':'播放音频') ;
+            buttonVidio.innerHTML = ( options.video  ?'停止视频':'播放视频') ;
+        };
+        parentDiv.appendChild(buttonAV);
+
+        buttonAudio.setAttribute('style', 'position: absolute;float:left;border:1px solid;z-index:999;top:25px;');
+        buttonAudio.setAttribute('id', 'buttonA' + userId);
+        buttonAudio.innerHTML =  ( options.audio ?'停止音频':'播放音频') ;
+        buttonAudio.onclick = function () {
+            if(buttonAudio.innerHTML === '播放音频'){
+                TK.Logger.info( 'play [audio]. elementId is '+(local?'myVideo':'test' + userId) );
+                options.audio = true ;
+                _room.playAudio(userId, local?'myVideo':'test' + userId)
+            }else{
+                TK.Logger.info( 'unplay [audio]. elementId is '+(local?'myVideo':'test' + userId) );
+                options.audio = false ;
+                _room.unplayAudio(userId);
+            }
+            buttonAV.innerHTML = ( options.video && options.audio ?'停止音视频':'播放音视频') ;
+            buttonAudio.innerHTML = ( options.audio ?'停止音频':'播放音频') ;
+            buttonVidio.innerHTML = ( options.video  ?'停止视频':'播放视频') ;
+        };
+        parentDiv.appendChild(buttonAudio);
+
+        buttonVidio.setAttribute('style', 'position: absolute;float:left;border:1px solid;z-index:999;'+(local?'top:0px;':'top:50px;') );
+        buttonVidio.setAttribute('id', 'buttonV' + userId);
+        buttonVidio.innerHTML = ( options.video  ?'停止视频':'播放视频')  ;
+        buttonVidio.onclick = function () {
+            if(buttonVidio.innerHTML === '播放视频'){
+                TK.Logger.info( 'play [video]. elementId is '+(local?'myVideo':'test' + userId) );
+                options.video = true ;
+                _room.playVideo(userId, local?'myVideo':'test' + userId, {mirror: _videoMirror, loader: _videoLoader, mode: _videoMode});
+                if (local) {
+                    _watchingLocalVideo = true;
+                    theElement('previewvideo').innerHTML = 'close';
+                }
+            }else{
+                TK.Logger.info( 'unplay [video]. elementId is '+(local?'myVideo':'test' + userId) );
+                options.video = false ;
+                _room.unplayVideo(userId);
+                if (local) {
+                    _watchingLocalVideo = false;
+                    theElement('previewvideo').innerHTML = 'preview';
+                }
+            }
+            buttonAV.innerHTML = ( options.video && options.audio ?'停止音视频':'播放音视频') ;
+            buttonAudio.innerHTML = ( options.audio ?'停止音频':'播放音频') ;
+            buttonVidio.innerHTML = ( options.video  ?'停止视频':'播放视频') ;
+        };
+        parentDiv.appendChild(buttonVidio);
+        var user = local ? _room.getMySelf(): _room.getUser(streamUserid);
+        if(user){
+            user.updatePlayAVButton = function (user) {
+                buttonAV.removeAttribute('disabled');
+                buttonVidio.removeAttribute('disabled');
+                
+                if(local){
+                    buttonAV.style.display = 'none';
+                    buttonAudio.style.display = 'none';
+                }
+            };
+            user.updatePlayAVButton(user);
+        }
+    };
+
+    // 创建发布按钮
+    function _createPublishBtns(parentDiv , local) {
+        if(local){
+            var audio = false , video = false ;
+            var buttonAV = document.createElement('button');
+            var buttonAudio = document.createElement('button');
+            var buttonVidio = document.createElement('button');
+            buttonAV.setAttribute('style', 'position: absolute;float:left;border:1px solid;z-index:999;top:0px;right:0px;');
+            buttonAV.setAttribute('id', 'button' + _room.getMySelf().id);
+            buttonAV.innerHTML = (_room.getMySelf().publishstate === 0 ) ? '发布音视频' : '取消发布音视频';
+            buttonAV.onclick = function () {
+                if(buttonAV.innerHTML === '发布音视频'){
+                    TK.Logger.info( 'publish [audio and video]. elementId is '+('myVideo') );
+                    video = true ;
+                    audio = true ;
+                    _room.publishVideo();
+                    _room.publishAudio();
+                }else{
+                    TK.Logger.info( 'unpublish [audio and video]. elementId is '+('myVideo') );
+                    video = false ;
+                    audio = false ;
+                    _room.unpublishVideo();
+                    _room.unpublishAudio();
+                }
+                buttonAV.innerHTML = (_room.getMySelf().publishstate === 0 ) ? '发布音视频' : '取消发布音视频';
+                buttonAudio.innerHTML = ( ( _room.getMySelf().publishstate === 1 || _room.getMySelf().publishstate === 3) ?'取消发布音频':'发布音频') ;
+                buttonVidio.innerHTML = ( ( _room.getMySelf().publishstate === 2 || _room.getMySelf().publishstate === 3)   ?'取消发布视频':'发布视频') ;
+            };
+            parentDiv.appendChild(buttonAV);
+
+            buttonAudio.setAttribute('style', 'position: absolute;float:left;border:1px solid;z-index:999;top:25px;right:0px;');
+            buttonAudio.setAttribute('id', 'button' + _room.getMySelf().id);
+            buttonAudio.innerHTML = ( (_room.getMySelf().publishstate === 1 || _room.getMySelf().publishstate === 3) ?'取消发布音频':'发布音频') ;
+            buttonAudio.onclick = function () {
+                if(buttonAudio.innerHTML === '发布音频'){
+                    TK.Logger.info( 'publish [audio]. elementId is  '+('myVideo') );
+                    audio = true ;
+                    _room.publishAudio();
+                }else{
+                    TK.Logger.info( 'unpublish [audio]. elementId is  '+('myVideo') );
+                    audio = false ;
+                    _room.unpublishAudio();
+                }
+                buttonAV.innerHTML = (_room.getMySelf().publishstate === 0 ) ? '发布音视频' : '取消发布音视频';
+                buttonAudio.innerHTML = ( ( _room.getMySelf().publishstate === 1 || _room.getMySelf().publishstate === 3) ?'取消发布音频':'发布音频') ;
+                buttonVidio.innerHTML = ( ( _room.getMySelf().publishstate === 2 || _room.getMySelf().publishstate === 3)   ?'取消发布视频':'发布视频') ;
+            };
+            parentDiv.appendChild(buttonAudio);
+
+            buttonVidio.setAttribute('style', 'position: absolute;float:left;border:1px solid;z-index:999;top:50px;right:0px;');
+            buttonVidio.setAttribute('id', 'button' + _room.getMySelf().id);
+            buttonVidio.innerHTML = ( (_room.getMySelf().publishstate === 2 || _room.getMySelf().publishstate === 3)   ?'取消发布视频':'发布视频') ;
+            buttonVidio.onclick = function () {
+                if(buttonVidio.innerHTML === '发布视频'){
+                    TK.Logger.info( 'publish [video]. elementId is '+('myVideo') );
+                    video = true ;
+                    _room.publishVideo();
+                }else{
+                    TK.Logger.info( 'unpublish [video]. elementId is '+('myVideo') );
+                    video = false ;
+                    _room.unpublishVideo();
+                }
+                buttonAV.innerHTML = (_room.getMySelf().publishstate === 0 ) ? '发布音视频' : '取消发布音视频';
+                buttonAudio.innerHTML = ( ( _room.getMySelf().publishstate === 1 || _room.getMySelf().publishstate === 3) ?'取消发布音频':'发布音频') ;
+                buttonVidio.innerHTML = ( ( _room.getMySelf().publishstate === 2 || _room.getMySelf().publishstate === 3)   ?'取消发布视频':'发布视频') ;
+            };
+            parentDiv.appendChild(buttonVidio);
+            _room.getMySelf().updatePublishButtonsState = function (user) {
+                var userpublishstate =  user.publishstate ;
+                buttonAV.removeAttribute('disabled');
+                buttonVidio.removeAttribute('disabled');
+                buttonAV.innerHTML = (userpublishstate === 0 ) ? '发布音视频' : '取消发布音视频';
+                buttonAudio.innerHTML = ( ( userpublishstate === 1 || userpublishstate === 3) ?'取消发布音频':'发布音频') ;
+                buttonVidio.innerHTML = ( ( userpublishstate === 2 || userpublishstate === 3)   ?'取消发布视频':'发布视频') ;
+            };
+            _room.getMySelf().updatePublishButtonsState(_room.getMySelf());
+        }
+    };
+
+    function printRecvMsg(msg) {
+        var li = document.createElement('li');
+        li.innerHTML = msg;
+        theElement('recvMsg').appendChild( li );
+    }
+
+    function clearView() {
+        var videoContainer = theElement('videoContainer');
+        childNodes = videoContainer.childNodes;
+        for (var i = childNodes.length - 1; i >= 0; i--) {
+            if (childNodes[i].id !== 'myVideo') {
+                videoContainer.removeChild(childNodes[i])    
+            }
+        }
+
+        var msgContainer = theElement('recvMsg');
+        while(msgContainer.hasChildNodes()) {
+            msgContainer.removeChild(msgContainer.firstChild);
+        }
+    }
+
+    function shareMediaFile() {
+        if (_shareMediaFileState === OperationState.Stopped) {
+            if (theElement('myMedia')) {
+                theElement('videoContainer').removeChild( theElement('myMedia') );
+            }
+            var div = document.createElement('div');
+            div.setAttribute('style', 'position: relative;width: 320px; height: 240px; float:left;border:1px solid red;');
+            div.setAttribute('id', 'myMedia');
+            theElement('videoContainer').appendChild(div);
+            _native.getOpenFileName({caption: 'open', filter: {'MP4 Files':'*.mp4','Audio Files':'*.mp3;*.wav'}}, function(arg) {
+                _native.startShareMediaFile(arg.filename, 'myMedia', function(err) {
+                    TK.Logger.error('share media file error.', err);
+                });
+                _native.registerMediaFileProgressListener(1000, function(arg) {
+                    if (!_mediaFileInfo.seeking) {
+                        theElement('mediaProgress').value = arg.position * 100 / arg.duration;    
+                    }
+                    theElement('mediafilepos').value = calcDuration(arg.position/1000) + '/' + calcDuration(arg.duration/1000);
+                    _mediaFileInfo.duration = arg.duration;
+                    _mediaFileInfo.position = arg.position;
+                });
+                _shareMediaFileState = OperationState.Started;
+                theElement('sharemeidafile').value = 'pause';
+            });
+            
+        } else if (_shareMediaFileState === OperationState.Started) {
+            _native.pauseShareMediaFile(true);
+            _shareMediaFileState = OperationState.Paused;
+            theElement('sharemeidafile').value = 'resume';
+        } else if (_shareMediaFileState === OperationState.Paused) {
+            _native.pauseShareMediaFile(false);
+            _shareMediaFileState = OperationState.Started;
+            theElement('sharemeidafile').value = 'pause';
+        }
+    }
+
+    function calcDuration(duration) {
+        var strDuration = "";
+
+        var time_h = 0, time_m = 0, time_s = 0;
+        time_h = Math.floor(duration / 3600);
+        time_m = Math.floor((duration % 3600) / 60);
+        time_s = Math.floor(duration % 60);
+        return (time_m<10?'0':'') + time_m.toString() + ':' + (time_s<10?'0':'') + time_s.toString();
+    }
+
+    function stopMediaFile() {
+        if (_shareMediaFileState === OperationState.Stopped) return;
+        if (theElement('myMedia')) {
+            theElement('videoContainer').removeChild( theElement('myMedia') );
+        }
+        _native.stopShareMediaFile(function(err){
+            TK.Logger.error('stop media file error,', err);
+        });
+        _native.unregisterMediaFileProgressListener();
+        _shareMediaFileState = OperationState.Stopped;
+        theElement('sharemeidafile').value = 'sharemedia';
+    }
+
+    function onSeekMedia() {
+        var posPercent = theElement('mediaProgress').value / 100;
+        _native.seekMediaFile(posPercent);
+    }
+
+    function onSeekMouseDown() {
+        _mediaFileInfo.seeking = true;
+    }
+
+    function onSeekMouseUp() {
+        _mediaFileInfo.seeking = false;
+    }
+
+    function localRecord() {
+        if (_localRecordState === OperationState.Stopped) {
+            var onSuccess = function(arg) {
+                TK.Logger.info('record success.', arg);
+            };
+            var onFailure = function(arg) {
+                TK.Logger.error('record failed.', arg);
+            };
+
+            var filter = {"All Files":"*.*", "Video File":"*.mp4;*.flv", "Audio File":"*.mp3"};
+            _native.getSaveFileName({caption:"Save", filter: filter, suffix: ''}, function(arg) {
+                if (arg.action !== 'Complete') return;
+                var filename = arg.filename;
+                TK.Logger.error('get open file', filename);
+                if (_localRecordType === RecordType.Screen) {
+                    var spec = {filename: filename, catchcursor: true};
+                    _native.startRecordScreen(spec, onSuccess, onFailure);
+                } else if (_localRecordType === RecordType.Audio) {
+                    var spec = {filename: filename};
+                    _native.startRecordAudio(spec, onSuccess, onFailure)
+                }
+
+                _localRecordState = OperationState.Started;
+                theElement('localrecord').value = 'pause';
+            });
+        } else if (_localRecordState === OperationState.Started) {
+            if (_localRecordType === RecordType.Screen) {
+                _native.pauseRecordScreen(true);
+            } else if (_localRecordType === RecordType.Audio) {
+                _native.pauseRecordAudio(true);
+            }
+
+            _localRecordState = OperationState.Paused;
+            theElement('localrecord').value = 'resume';
+        } else if (_localRecordState === OperationState.Paused) {
+            if (_localRecordType === RecordType.Screen) {
+                _native.pauseRecordScreen(false);
+            } else if (_localRecordType === RecordType.Audio) {
+                _native.pauseRecordAudio(false);
+            }
+
+            _localRecordState = OperationState.Started;
+            theElement('localrecord').value = 'pause';
+        }
+    }
+
+    function stopRecord() {
+        if (_localRecordState === OperationState.Stopped) return;
+        
+        if (_localRecordType === RecordType.Screen) {
+            _native.stopRecordScreen();
+        } else if (_localRecordType === RecordType.Audio) {
+            _native.stopRecordAudio();
+        }
+
+        _localRecordState = OperationState.Stopped;
+        theElement('localrecord').value = 'localrecord';
+    }
+
+    function serverRecord() {
+        if (_serverRecordState !== OperationState.Started) {
+            var spec = {
+                recordType: TK.REC_TYPE_MIXVIDEO,
+                convert: 0,
+            };
+            _room.startServerRecord(spec);
+            _serverRecordState = OperationState.Started;
+            theElement('serverrecord').value = '停止服务器端录制';
+        } else {
+            _room.stopServerRecord();
+            _serverRecordState = OperationState.Stopped;
+            theElement('serverrecord').value = '开始服务器端录制';
+        }
+    }
+
+    function previewVideo() {
+        if (_watchingLocalVideo) {
+            _watchingLocalVideo = false;
+            theElement('previewvideo').innerHTML = 'preview';
+            _room.unplayVideo('');
+        } else {
+            _watchingLocalVideo = true;
+            theElement('previewvideo').innerHTML = 'close';
+            if (!theElement('myVideo')) {
+                var div = document.createElement('div');
+                div.setAttribute('style', 'position: relative;width: 360px; height: 240px; float:left;border:1px solid red;');
+                div.setAttribute('id', 'myVideo');
+                theElement('videoContainer').appendChild(div);
+            }
+            
+            // 播放本地视频
+            _room.playVideo('', 'myVideo', {mirror: _videoMirror, loader: _videoLoader, mode: _videoMode}, function(err) {
+                TK.Logger.error("play video error: ", err);
+            });
+        }
+        
+    }
+
+    function setVideoProfile() {
+        var onFailure = function(err) {
+            TK.Logger.error('setVideoProfile',err);
+            theElement('videoprofile').checked = theElement('videoprofile').checked ? false : true;
+        };
+        if (theElement('videoprofile').checked) {
+            _room.setVideoProfile({width: 240, height: 240, maxfps: 10}, onFailure);
+        } else {
+            _room.setVideoProfile(_originalVideoProfile, onFailure);
+        }
+    }
+
+    function setVideoMirror() {
+        _videoMirror = theElement('videomirror').checked;
+        
+    }
+    function setVideoLoader() {
+        _videoLoader = theElement('videoloader').checked;
+    }
+    function setVideoMode() {
+        _videoMode = theElement('videomode').checked ? TK_VIDEO_MODE.ASPECT_RATIO_CONTAIN : TK_VIDEO_MODE.ASPECT_RATIO_COVER;
+    }
+
+    function shareScreen() {
+        if( !_shareScreening ){
+            _native.createShareScreenWindow(500,500,50,50);
+            _native.startShareScreen(); //开始共享屏幕
+            theElement('sharesceen').value = 'stopShareScreen';
+            _shareScreening = true ;
+        }else{
+            _native.stopShareScreen(); //停止共享屏幕
+            theElement('sharesceen').value = 'startShareScreen';
+            _shareScreening = false ;
+        }
+    }
+
+</script>
+
+<div id="ctrlelementgroup">
+    <lable style="color: #C5221F;">请登录企业管理系统(http://global.talk-cloud.net/User/login.html)创建房间，将房间号及密码填入相应输入框后加入房间</lable><br><br>
+    WebServer: <input id="webserver" type="text" value="" size="30"/>
+    RoomID: <input id="roomid" type="text" value="" size="20"/>
+    Password: <input id="password" type="text" value="" size="20"/>
+    NickName: <input id="nickname" type="text" value="Superman" size="20"/>
+    <button id="startDevicesTestBox" onclick="startDevicesTest()">设备检测</button>
+    <input type="button" id="joinRoom" onclick="joinRoom()" value="joinRoom"/>
+    <input type="button" id="leaveRoom" onclick="leaveRoom()" value="leaveRoom"/>
+    <button id="previewvideo" onclick="previewVideo()" size="20">preview</button><br><br>
+
+    <input type="button" id="pubmsg" onclick="pubmsg()" value="发布自定义消息"/>
+    <input type="button" id="delmsg" onclick="delmsg()" value="删除自定义消息"/>
+    <input type="button" id="changeproperty" onclick="changeproperty()" value="改变用户属性 "/>
+    <input type="button" id="audioroom" onclick="changeAudioRoom()" value="切换为纯音频教室"/>
+    <input type="button" id="evict" onclick="evict()" value="请出其他用户"/>
+    <input type="button" id="serverrecord" onclick="serverRecord()" value="开始服务器端录制"/><br><br>
+    <input type="text" id="text" style="text-align:left;"  size="30" placeholder="聊天消息内容"/>
+    <input type="button" id="send" onclick="sendMsg()" value="发送"/><br><br>
+    视频显示选项(对已开启的视频无效)：<input type="checkbox" id="videomirror" onclick="setVideoMirror()" value="" style="margin-left: 15px"/>镜像
+    <input type="checkbox" id="videoloader" onclick="setVideoLoader()" value="" style="margin-left: 15px" checked="" />"加载中"GIF
+    <input type="checkbox" id="videomode" onclick="setVideoMode()" value="" style="margin-left: 15px" checked="" />包含模式
+    <br><br>
+</div>
+<div id='nativectrlelementgroup'>
+    <input type="button" id="sharemeidafile" onclick="shareMediaFile()" value="sharemedia"/>
+    <input type="range" id="mediaProgress" min="0" max="100" step="1" value="0" onchange="onSeekMedia()" onmousedown="onSeekMouseDown()" onmouseup="onSeekMouseUp()" />
+    <input id="mediafilepos" type="text" value="0" style="width: 120px"/>
+    <input type="button" id="stopeidafile" onclick="stopMediaFile()" value="stopmedia"/>
+    <input type="button" id="localrecord" onclick="localRecord()" value="localrecord"/>
+    <input type="button" id="stoprecord" onclick="stopRecord()" value="stoprecord"/>
+    <input type="button" id="sharesceen" onclick="shareScreen()" value="startShareScreen"/>
+</div>
+<hr>
+
+<!--设备检测区域-->
+<div id="deviceDetectionBox" style="font-size:15px;display:none;background: rgba(0,0,0,0.5);position: absolute; left: 0; top: 0;width:100%;height: 100%;z-index: 9999; ">
+    <div style="background: #66d9ef;position: absolute;left: 50%;top: 50%;transform: translate(-50% , -50%);padding: 20px;">
+        <lable>视频输入设备：</lable><select style="margin-top: 5px;display: inline-block;  padding: 5px 10px;height: 50px;" id="selectVideoInputDevices"  onchange="selectVideoInputDevices(this)"></select><br />
+        <lable>音频输入设备：</lable><select style="margin-top: 5px;display: inline-block; padding: 5px 10px;height: 50px;" id="selectAudioInputDevices"  onchange="selectAudioInputDevices(this)" ></select><br />
+        <lable>音频输出设备：</lable><select style="margin-top: 5px;display: inline-block; padding: 5px 10px;height: 50px;" id="selectAudioOutputDevices"  onchange="selectAudioOutputDevices(this)" ></select><br />
+        <input type="checkbox" id="videoprofile" onclick="setVideoProfile()" value=""/>change video profile<br>
+        <div id="deviceDetectionMediaArea" >
+            <div  id="deviceDetectionVideoPlayerContainer" style="background: #000;width: 320px;height: 240px;margin-top: 20px;" ></div>
+            <div id="deviceDetectionAudioPlayerContainer" style="display: none;" ></div>
+            测试扬声器：<audio id="deviceDetectionAudiooutput" src="./detectionDevice_default.wav"  controls ></audio>
+            <input type="button" id="testspeaker" onclick="testSpeaker()" value="test"/><br>
+            当前设备说话的音量(0-100)：<span id="deviceDetectionAudioPlayerVolume"  >0</span>
+        </div>
+
+        <div style="overflow: hidden;padding-top: 10px;">
+            <button id="finishDevicesTestBox" style="float: right;margin-left: 10px;padding: 5px;"  onclick="finishDevicesTest()" >切换选中设备</button>
+            <button id="stopDevicesTestBox" style="float: right;margin-left: 10px;padding: 5px;"  onclick="stopDevicesTest()" >关闭</button>
+        </div>
+    </div>
+</div>
+
+<!--视频显示区域-->
+<div id="videoContainer" style="overflow: hidden"></div>
+
+<ul id="recvMsg" style=" margin-top: 50px;">
+</ul>
+</body>
+</html>

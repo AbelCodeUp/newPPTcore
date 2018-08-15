@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html <!--{ISPRING_HTML_ATTRIBUTES}-->>
+<head>
+    <!--{ISPRING_HEAD_CONTENT}-->
+    <!--{ISPRING_IOS_CHECK}-->
+
+</head>
+<body>
+	<div id="preloader"></div>
+	
+    <div id="content"></div>
+    <!--{ISPRING_BODY_CONTENT}-->
+	
+	<div id="loadJs" ></div>
+	<script>
+		window.GLOBAL = window.GLOBAL || {} ;
+		function startPlaying()
+		{
+			if (!ispring.compatibility.performRedirectIfNeeded("{ISPRING_REDIRECT_PAGE}"))
+			{
+				(function(startup){
+					function start(savedPresentationState)
+					{
+						console.log("savedPresentationState info:" , savedPresentationState);
+						var presInfo = {/*ISPRING_PRESENTATION_INFO*/};
+						PresentationPlayer.start(presInfo, "content", "playerView", window.GLOBAL.onPlayerInit, savedPresentationState);
+					}
+			
+					if (startup)
+						startup(start);
+					else
+						start();
+				})(/*{ISPRING_PLAYER_STARTUP}*/);
+			};
+		}
+		
+		window.GLOBAL.getUrlParams = window.GLOBAL.getUrlParams ||  function(key) {
+			// var urlAdd = decodeURI(window.location.href);
+			var urlAdd = decodeURIComponent(window.location.href);
+			var urlIndex = urlAdd.indexOf("?");
+			var urlSearch = urlAdd.substring(urlIndex + 1);
+			var reg = new RegExp("(^|&)" + key + "=([^&]*)(&|$)", "i");
+			var arr = urlSearch.match(reg);
+			if(arr != null) {
+				return arr[2];
+			} else {
+				return "";
+			}
+			//reg表示匹配出:$+url传参数名字=值+$,并且$可以不存在，这样会返回一个数组
+		};
+		window.GLOBAL.loadScript =  window.GLOBAL.loadScript || function (url, callback) {
+			var script = document.createElement("script");
+			script.type = "text/javascript";
+			if( typeof(callback) != "undefined"  && typeof callback === 'function' ){
+				if (script.readyState) {
+				  script.onreadystatechange = function () {
+					if (script.readyState == "loaded" || script.readyState == "complete") {
+					  script.onreadystatechange = null;
+					  callback();
+					}
+				  };
+				} else {
+				  script.onload = function () {
+					callback();
+				  };
+				}
+			}
+			script.src = url;
+			var loadJs = document.getElementById('loadJs') || document.body ;
+			loadJs.appendChild(script);
+		}
+		var playerUrl = '../../Public/js/player.js?remoteNewpptUpdateTime='+( window.GLOBAL.getUrlParams('remoteNewpptUpdateTime') || new Date().getTime() ) ;
+		var newpptUrl = '../../Public/js/newppt.js?remoteNewpptUpdateTime='+( window.GLOBAL.getUrlParams('remoteNewpptUpdateTime') || new Date().getTime() ) ;
+		window.GLOBAL.loadScript(playerUrl);
+		window.GLOBAL.loadScript(newpptUrl);
+    </script>
+	<!--<script src="../../Public/js/player.js?%RANDOM_SEED%"></script>
+    <script src="../../Public/js/newppt.js?%RANDOM_SEED%"></script>-->
+</body>
+</html>

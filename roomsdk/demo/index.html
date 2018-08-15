@@ -1,0 +1,326 @@
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Talk-Cloud Example</title>
+    <script type="text/javascript" src="../sdk/jquery.min.js?222"></script>
+    <script type="text/javascript" src="../sdk/tksdk.js?222"></script>
+    <script src="../lib/pptmiddleware.js" charset="utf-8"></script>
+</head>
+
+<body style="width: 100%;margin: 0;height: 100%;">
+
+<div id="ctrlelementgroup">
+    <lable style="color: #2127c5;text-align: center;display: block;font-size: 25px;">请登录企业管理系统(http://global.talk-cloud.net/User/login.html)创建房间，将房间号及密码填入相应输入框后加入房间</lable>
+    WebServer: <input id="webserver" type="text" value="" size="30"/>
+    RoomID: <input id="roomid" type="text" value="" size="20"/>
+    Password: <input id="password" type="text" value="" size="20"/>
+    NickName: <input id="nickname" type="text" value="Superman" size="20"/>
+    <input type="button" id="joinRoom" onclick="joinRoom()" value="joinRoom"/>
+    <input type="button" id="leaveRoom" onclick="leaveRoom()" value="leaveRoom"/>
+    <br><lable style="color: #C5221F;">注：demo的通信机制使用拓课云的通信系统，您可以使用您的通信系统进行通信</lable><br>
+    <hr>
+    <input type="text" name="" id="PPTUrl" placeholder="文件路径" value="" style="width:500px" >
+    <input type="text" name="" id="fileId" placeholder="文件ID" value="" style="width:100px" >
+    <input type="button" id="openPPT" value="openPPT" />
+    <input type="button" id="prevPage" value="上一页" />
+    <input type="button" id="nextPage" value="下一页" />
+    <input type="text" name="" value="" id="urlText" >
+    <input type="button" id="jumpPage" value="跳转到" />
+    <input type="button" id="prevStep" value="上一帧" />
+    <input type="button" id="nextStep" value="下一帧" />
+</div>
+<div id="FrameBox"></div>
+<script type="text/javascript">
+    function theElement(id) {
+        return document.getElementById(id);
+    }
+    // 服务器地址
+    var _hostName = "global.talk-cloud.net";
+    // 房间号。请登录http://global.talk-cloud.net/User/login.html创建房间，将创建好的房间号赋值给此变量
+    var _roomSerial = '';
+    // 房间密码。将房间对应的密码赋值给此变量
+    var _roomPassword = '';
+
+    var _room = TK.Room();  // 房间管理对象
+    var _isDebugLog = false; //是否是debug级别日志
+    var fn = null; //PPT初始化
+    var PPTUrl = $('#PPTUrl'); //PPT地址输入框
+    var fileId = $('#fileId'); //文件ID输入框
+
+    _room.setLogIsDebug(_isDebugLog) ;
+    //ppt 同步,接收信令消息
+    _room.addEventListener("room-pubmsg", function(roomEvent){
+      var message = roomEvent.message;
+      switch (message.name) {
+        case 'openPPT':
+          var data = message.data;
+          fn.onOpenPPT(data.url,data.fileid); //执行打开PPT动作
+          break;
+        case 'onStepChanged':
+          var data = message.data;
+          fn.passiveSkipPage(data.slide,data.step); //执行被动  帧动作
+          break;
+        case 'onSlideChanged':
+          var data = message.data;
+          fn.passiveSkipPage(data.slide); //执行被动  翻页动作
+          break;
+        case 'clickNewpptTriggerEvent':
+          var data = message.data;
+          fn.tiggerAction(data); //执行触发器动作
+          break;
+
+        case 'startPlayVideoEvent':
+          var data = message.data;
+          fn.tiggerAction(data); //执行触发器动作
+          break;
+        default:
+
+      }
+    })
+
+
+    // 房间连接成功
+    _room.addEventListener("room-connected", function (roomEvent) {
+        TK.Logger.info('room-connected', roomEvent);
+        //用户连接成功后，获取服务器所有的信令消息
+        var data = roomEvent.message;
+        for (var i = 0; i < data.length; i++) {
+          var PubMsg = data[i];
+          switch (PubMsg.name) {
+            case 'openPPT':
+              var pubMsgData = PubMsg.data;
+              PPTUrl.val(pubMsgData.url);
+              fileId.val(pubMsgData.fileid);
+              fn.onOpenPPT(pubMsgData.url,pubMsgData.fileid); //执行打开PPT动作
+              break;
+            case 'onStepChanged':
+              var pubMsgData = PubMsg.data;
+              fn.passiveSkipPage(pubMsgData.slide,pubMsgData.step); //执行被动  帧动作
+
+              break;
+            case 'onSlideChanged':
+              var pubMsgData = PubMsg.data;
+              fn.passiveSkipPage(pubMsgData.slide); //执行被动  翻页动作
+              break;
+
+            case 'clickNewpptTriggerEvent':
+              var pubMsgData = PubMsg.data;
+              fn.tiggerAction(pubMsgData); //执行触发器动作
+              break;
+            default:
+          }
+        }
+        var idArr = ['joinRoom'];
+        setElementDisable(idArr,true);
+    });
+
+    // 房间连接失败
+    _room.addEventListener("room-error", function(roomEvent) {
+        TK.Logger.error("join room error: ", roomEvent);
+        alert('join room error');
+    });
+
+    // 离开房间成功
+    _room.addEventListener('room-leaveroom', function (roomEvent){
+        TK.Logger.debug('room-leaveroom' , roomEvent);
+        var idArr = ['joinRoom'];
+        setElementDisable(idArr,false);
+    });
+
+    function leaveRoom() {
+        _room.leaveroom();
+    }
+    function joinRoom() {
+        var host = theElement('webserver').value;
+        var serial = theElement('roomid').value;
+        var password = theElement('password').value;
+        var nick = theElement('nickname').value;
+        if (host === '') {
+            alert('please type web server address...');
+            return;
+        }
+        if (serial === '') {
+            alert('please type room ID...');
+            return;
+        }
+        var myOpt = {
+            class: 'one',
+            grade: 'two',
+        };
+        _room.joinroom(host, 443, nick, '', {serial:serial, password:password}, myOpt);
+    }
+    function setElementDisable(elementIdList,isDisable,group) {
+        if (!group) {
+            group = 'ctrlelementgroup';
+        }
+        var btnEle = theElement(group).querySelectorAll('input');
+        for(var i=0 ; i<btnEle.length ; i++){
+            var value = btnEle[i];
+            if (elementIdList && elementIdList.indexOf(value.id) >= 0) {
+                value.disabled = isDisable;
+            } else {
+                value.disabled = !isDisable;
+            }
+        }
+    };
+    /**
+     * 发送信令
+     */
+    function PubMsg(option){
+      var params = {
+      	msgName : option.msgName || '',
+      	msgId : option.msgId,
+      	toID : TK.MSG_TO_ALLEXCEPTSENDER,
+      	data : option.data || '',
+      	save : true,
+      };
+      _room.pubMsg(params);
+    }
+
+    window.onload = function () {
+        theElement("webserver").value = _hostName;
+        theElement('roomid').value = _roomSerial;
+        theElement('password').value = _roomPassword;
+        var idArr = ['joinRoom', 'webserver', 'roomid', 'password', 'nickname', 'urlText'];
+        setElementDisable(idArr,false);
+
+        //PPT
+        fn = new PPTMiddleWare('FrameBox');
+
+        $('#openPPT').click(function(){ //点击处触发打开PPT
+          var url = $('#PPTUrl').val();
+          var fileid = $('#fileId').val();
+
+          if(url == '' || fileid == ''){
+            alert('请输入文件路径和文件ID');
+            return false;
+          }
+
+          var data = {
+            url: url,
+            fileid:fileid //文件 ID
+          }
+          var sendData = { //发送的信令消息
+            msgName : 'openPPT',
+          	msgId : 101,
+          	toID : TK.MSG_TO_ALLEXCEPTSENDER,
+          	data : data,
+          	save : true,
+          }
+          /**
+           * [打开PPT]
+           * @param  url  [文件地址]
+           * @param  fileid [文件ID]
+           */
+          fn.onOpenPPT(url, fileid);
+          PubMsg(sendData);
+        })
+        $('#prevPage').click(function(){
+          fn.prevPage() //触发上一页动作
+
+        })
+        $('#nextPage').click(function(){
+          fn.nextPage(); //触发下一页动作
+        })
+        $('#jumpPage').click(function(){
+          var iText = $('#urlText').val();
+          fn.initiativeSkipPage(iText);  //跳转至某一页动作动作
+        })
+
+        $('#prevStep').click(function(){
+          fn.prevStep(); //返回上一帧
+        })
+        $('#nextStep').click(function(){
+          fn.nextStep(); //进入下一帧
+        })
+
+        /**
+         * PPT切换时触发函数
+         * @param  {[Object]} event [返回当前页码和当前帧]
+         * @return {[type]}       [发送服务器信令，同步数据]
+         */
+        fn.onSlideChanged = function(event){
+          var data = {
+            slide:event.slide,
+            step:event.step,
+          }
+
+          var sendData = {
+            msgName : 'onSlideChanged',
+          	msgId : 108,
+          	toID : TK.MSG_TO_ALLEXCEPTSENDER,
+          	data : data,
+          	save : true,
+          }
+          PubMsg(sendData);
+        }
+        /**
+         * PPT帧切换时触发函数
+         * @param  {[Object]} event [返回当前页码和当前帧]
+         * @return {[type]}       [发送服务器信令，同步数据]
+         */
+        fn.onStepChanged = function(event){
+          var data = {
+            slide:event.slide,
+            step:event.step,
+          }
+
+          var sendData = {
+            msgName : 'onStepChanged',
+          	msgId : 109,
+          	toID : TK.MSG_TO_ALLEXCEPTSENDER,
+          	data : data,
+          	save : true,
+          }
+          PubMsg(sendData);
+        }
+        /**
+         * PPT加载完成时触发
+         * @param  {[Object]} event [返回当前PPT的相关信息]
+         * [可以完成一此PPT加载完成后的一此操作]
+         */
+        fn.onFinished = function (event){
+        }
+        /**
+         * PPT触发器触发函数
+         */
+        fn.onAction = function(event){
+          var data = {
+            action:'startPlayVideoEvent',
+          }
+
+          var sendData = {
+            msgName : 'startPlayVideoEvent',
+          	msgId : 'startPlayVideoEvent',
+          	toID : TK.MSG_TO_ALLEXCEPTSENDER,
+          	data : data,
+          	save : true,
+          }
+          PubMsg(sendData);
+        }
+        /**
+         * PPT触发器触发函数
+         */
+        fn.onVideoChanged = function(event){
+          var data = {
+            slide:event.slide,
+            step:event.step,
+            triggerElementId:event.triggerElementId,
+            externalData:event.externalData
+          }
+
+          var sendData = {
+            msgName : 'clickNewpptTriggerEvent',
+          	msgId : 107,
+          	toID : TK.MSG_TO_ALLEXCEPTSENDER,
+          	data : data,
+          	save : true,
+          }
+          PubMsg(sendData);
+        }
+
+    };
+
+</script>
+</body>
+</html>
