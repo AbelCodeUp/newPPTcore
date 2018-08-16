@@ -944,6 +944,10 @@ window.onload = function(){
         window.GLOBAL.languageName = window.GLOBAL.browser.language && window.GLOBAL.browser.language.toLowerCase().match(/zh/g) ? 'chinese' : 'english';
         window.GLOBAL.versions = window.GLOBAL.getUrlParams("versions"); //版本号：2017082901
         window.GLOBAL.versions = window.GLOBAL.versions ? Number(window.GLOBAL.versions) : window.GLOBAL.versions;
+        /**
+         * [backEvent 是否返回当前PPT操作的event对象]
+         */
+        window.GLOBAL.backEvent = window.GLOBAL.getUrlParams("backevent") ? window.GLOBAL.getUrlParams("backevent") == "true" : false;
         window.GLOBAL.ServiceNewPptAynamicPPT = new window.GLOBAL.NewPptAynamicPPT();
         window.GLOBAL.actionHandlerFunction = function (data) {
             try {
@@ -971,7 +975,14 @@ window.onload = function(){
                 var USERTRIGGERAUDIO = 'userTriggerAudio';
                 var CLOSEACTIVEAUDIO = 'closeActiveAudio';
                 var OPENACTIVEAUDIO = 'openActiveAudio';
+                var SETCURSOR = 'setCursor';
                 switch (data.action) {
+                    case SETCURSOR:
+                      var iconUrl = data.iconUrl || '';
+                      var offsetX = data.offsetX || 0;
+                      var offsetY = data.offsetY || 0;
+                      (document.getElementById('playerView') || document.body).style.cursor = 'url('+ iconUrl +') '+ offsetX +' '+ offsetY +',auto';
+                    break;
                     case CLOSEACTIVEAUDIO:
                       var allAudios = window.GLOBAL.saveAudioSrc;
                       if(allAudios && allAudios.length > 0){
@@ -1352,12 +1363,12 @@ window.onload = function(){
                           }
                       };
 
-                        newPptAynamicThat.postMessageToParent(data);
+                      newPptAynamicThat.postMessageToParent(data);
 
-                        var parentNode = videos[0].parentNode;
-                        if(parentNode.classList.contains('iphone')){
-                          parentNode.classList.remove('video_player');
-                        }
+                      var parentNode = videos[0].parentNode;
+                      if(parentNode.classList.contains('iphone')){
+                        parentNode.classList.remove('video_player');
+                      }
 
                     }
                   }
@@ -1393,6 +1404,7 @@ window.onload = function(){
 
                 } else {
                     if (this && this.__proto__ && this.__proto__.play && typeof    this.__proto__.play === 'function') {
+
                         this.__proto__.play.apply(this, arguments);
                         var allAudio = window.GLOBAL.saveAudioSrc;
                         var that = this;
@@ -1598,6 +1610,24 @@ window.onload = function(){
         }
         window.GLOBAL.removeEvents(document, 'keydown', _documentKeydown);
         window.GLOBAL.addEvents(document, 'keydown', _documentKeydown);
+
+        //添加事件监听,并发送数据 bxk
+        if(window.GLOBAL.isControl){
+          var _backEvent = function(event){
+            var data = {
+              action: 'MouseLocation',
+              clientX: event.clientX,
+              clientY: event.clientY
+            };
+            window.GLOBAL.ServiceNewPptAynamicPPT.postMessageToParent(data);
+          }
+          window.GLOBAL.addEvents(document, 'mousedown', _backEvent);
+          window.GLOBAL.addEvents(document, 'mouseup', _backEvent);
+          window.GLOBAL.addEvents(document, 'click', _backEvent);
+          window.GLOBAL.addEvents(document, 'keydown', _backEvent);
+          window.GLOBAL.addEvents(document, 'touchstart', _backEvent);
+          window.GLOBAL.addEvents(document, 'mousemove', _backEvent);
+        }
 
         //禁止右键
         document.oncontextmenu = null ;

@@ -4,7 +4,7 @@
     <title>Talk-Cloud Example</title>
     <script type="text/javascript" src="../sdk/jquery.min.js?222"></script>
     <script type="text/javascript" src="../sdk/tksdk.js?222"></script>
-    <script src="../lib/pptmiddleware.min.js" charset="utf-8"></script>
+    <script src="../lib/pptmiddleware.js" charset="utf-8"></script>
 </head>
 
 <body style="width: 100%;margin: 0;height: 100%;">
@@ -31,6 +31,7 @@
     <input type="button" id="sendPlayMsg" value="发送播放测试消息">
     <input type="button" id="closeAudio" value="关闭当前播放音频">
     <input type="button" id="openAudio" value="打开当前播放音频">
+    <input type="button" id="setCursor" value="设置鼠标样式">
 </div>
 <div id="FrameBox"></div>
 <script type="text/javascript">
@@ -311,6 +312,10 @@
         })
         $('#nextStep').click(function(){
           fn.nextStep(); //进入下一帧
+        });
+
+        $('#setCursor').click(function(){
+          fn.setCursor('https://192.168.1.131/cur/pencli.cur',10,10);
         })
 
         /**
