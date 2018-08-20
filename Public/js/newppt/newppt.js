@@ -1031,15 +1031,22 @@ window.onload = function(){
                           document.body.removeChild(audioEle);
                        }
                         //重连后跳转至当前页和当前帧
-                        var ts = window.GLOBAL.ServiceNewPptAynamicPPT.playbackController.clock().timestamp();
-                        var nowSlideIndex = ts.slideIndex();
-                        var nowStepIndex = ts.stepIndex();
-                        window.GLOBAL.ServiceNewPptAynamicPPT.clearOldSlideInfo();
-                        window.GLOBAL.ServiceNewPptAynamicPPT.playbackController.gotoTimestamp(nowSlideIndex, nowStepIndex);
+                       var ts = window.GLOBAL.ServiceNewPptAynamicPPT.playbackController.clock().timestamp();
+                       var nowSlideIndex = ts.slideIndex()+1;
+                       var nowStepIndex = ts.stepIndex();
+                       var data = {
+                         slide: nowSlideIndex,
+                         step: nowStepIndex,
+                         timeOffset: undefined,
+                         autoStart: undefined,
+                       }
+                       window.GLOBAL.ServiceNewPptAynamicPPT.jumpToAnimData = data || {};
+                       window.GLOBAL.ServiceNewPptAynamicPPT.canJumpToAnim();
+
 
                     break;
                     case PLAYVIDEO :
-                    if(window.GLOBAL.isControl){
+                    if(window.GLOBAL.iscontrol){
                       window.GLOBAL.videoInitiative = data.externalData.initiative;
                       var videos = document.getElementsByTagName('video')[0];
 
@@ -1352,7 +1359,8 @@ window.onload = function(){
                       };
 
                       newPptAynamicThat.postMessageToParent(data);
-                      var parentNode = this;
+
+                      var parentNode = videos[0].parentNode;
                       if(parentNode.classList.contains('iphone')){
                         parentNode.classList.remove('video_player');
                       }
@@ -1421,7 +1429,6 @@ window.onload = function(){
                         $vd.setAttribute("id", eleId);
                         var $resouce = $vd.querySelectorAll("source");
                         var videoFileUrl = undefined;
-                        var videoMP4Url = undefined;
                         if ($resouce && $resouce.length > 0) {
                             for (var j = 0; j < $resouce.length; j++) {
                                 var $rs = $resouce[j];
@@ -1431,63 +1438,46 @@ window.onload = function(){
                                         videoFileUrl = $rs.getAttribute("src");
                                         break;
                                     }
-                                    if ($rs.getAttribute("type").indexOf('mp4') !== -1) {
-                                        videoMP4Url = $rs.getAttribute("src");
-                                        break;
-                                    }
-
                                 }
                             }
                             if (!videoFileUrl) {
                                 dynamicPptLog.error('video resouce webm url is not exist!', $resouce);
                                 return;
                             }
-                            // //bxk -->>存储每页存储video数据
-                            // var sourceHTML = [];
-                            // for (var i = 0; i < $resouce.length; i++) {
-                            //   sourceHTML.push($resouce[i].outerHTML)
-                            // }
-                            //
-                            //
-                            // var videoData = {
-                            //   src: videoMP4Url || videoFileUrl,
-                            //   slide: nowSlideIndex,
-                            //   source: sourceHTML
-                            // }
-                            // if(noticeParentIFrameData.pptslide>=0){
-                            //   window.GLOBAL.saveVideoSrc[noticeParentIFrameData.pptslide] = videoData;
-                            // }
-                            // // bxk -->>清空video src source 数据
-                            // $vd.src = '';
-                            // if($resouce && $resouce.length > 0){
-                            //   for (var i = $resouce.length - 1; i >= 0; i--) {
-                            //     $vd.removeChild($resouce[i]);
-                            //   }
-                            // }
+                            //bxk -->>存储每页存储video数据
+                            var sourceHTML = [];
+                            for (var i = 0; i < $resouce.length; i++) {
+                              sourceHTML.push($resouce[i].outerHTML)
+                            }
+                            var videoData = {
+                              src: videoFileUrl,
+                              slide: noticeParentIFrameData.pptslide,
+                              source: sourceHTML
+                            }
+                            window.GLOBAL.saveVideoSrc[noticeParentIFrameData.pptslide-1] = videoData;
+                            // bxk -->>清空video src source 数据
+                            $vd.src = '';
+                            if($resouce && $resouce.length > 0){
+                              for (var i = $resouce.length - 1; i >= 0; i--) {
+                                $vd.removeChild($resouce[i]);
+                              }
+                            }
+                        }else{
+                          //bxk 如果video没有子节点，从saveVideoSrc中重新获取节点
+                          if(window.GLOBAL.saveVideoSrc.length > 0){
+                            var index = noticeParentIFrameData.pptslide - 1;
+                            if(window.GLOBAL.saveVideoSrc[index].slide == noticeParentIFrameData.pptslide){
+                              videoFileUrl = window.GLOBAL.saveVideoSrc[index].src;
+                            }
+                          }
                         }
-                        // else{
-                        //   //bxk 如果video没有子节点，从saveVideoSrc中重新获取节点
-                        //   try {
-                        //     if(window.GLOBAL.saveVideoSrc.length > 0){
-                        //       var index = noticeParentIFrameData.pptslide;
-                        //       if(window.GLOBAL.saveVideoSrc[index]){
-                        //         if(window.GLOBAL.saveVideoSrc[index].slide == noticeParentIFrameData.pptslide){
-                        //           videoFileUrl = window.GLOBAL.saveVideoSrc[index].src;
-                        //         }
-                        //       }
-                        //     }
-                        //   } catch (e) {
-                        //       LogDevelopment.error('saveVideoSrc存储错误：',e)
-                        //   }
-                        //
-                        // }
                         if(videoFileUrl){
                             var data = {
                                 action: "autoPlayVideoInNewPpt",
                                 videoElementId: eleId,
                                 isvideo: true,
                                 fileid: window.GLOBAL.fileid,
-                                url: videoFileUrl || videoMP4Url,
+                                url: videoFileUrl,
                                 pptslide: noticeParentIFrameData.pptslide,
                                 externalData: noticeParentIFrameData.externalData,
                             };
@@ -1497,27 +1487,17 @@ window.onload = function(){
                 } else {
                     if (this && this.__proto__ && this.__proto__.play && typeof this.__proto__.play === 'function') {
                         //bxk start 判断video 里有没有子节点，如果没有 从saveVideosrc中获取
-                        try {
-
-                          // var $vb = this;
-                          // if( $vb){
-                          //     var $resouce = $vb.querySelectorAll('source');
-                          //     var ts = window.GLOBAL.ServiceNewPptAynamicPPT.playbackController.clock().timestamp();
-                          //     var nowSlideIndex = ts.slideIndex();
-                          //     if($resouce && $resouce.length <= 0 && window.GLOBAL.saveVideoSrc[nowSlideIndex]){
-                          //         $vb.src = window.GLOBAL.saveVideoSrc[nowSlideIndex].src;
-                          //         $vb.innerHTML = window.GLOBAL.saveVideoSrc[nowSlideIndex].source.join('');
-                          //     }
-                          // }
-                          //bxk end
-                          this.__proto__.play.apply(this, arguments);
-
-                        } catch (e) {
-                            LogDevelopment.error('saveVideoSrc存储错误：',e)
+                        var $vb = this;
+                        if( $vb){
+                            var $resouce = $vb.querySelectorAll('source');
+                            var ts = window.GLOBAL.ServiceNewPptAynamicPPT.playbackController.clock().timestamp();
+                            var nowSlideIndex = ts.slideIndex();
+                            if($resouce && $resouce.length <= 0){
+                                $vb.innerHTML = window.GLOBAL.saveVideoSrc[nowSlideIndex].source.join('');
+                            }
                         }
-
-
-
+                        //bxk end
+                        this.__proto__.play.apply(this, arguments);
 
                     }
                 }

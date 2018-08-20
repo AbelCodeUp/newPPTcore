@@ -238,7 +238,7 @@
             JSON.stringify({
               source:'tk_dynamicPPT',
               data:{
-                action:'closeActiveAudio',
+                action:'stopDynamicPpt',
               }
             }),
           "*");
@@ -248,7 +248,7 @@
             JSON.stringify({
               source:'tk_dynamicPPT',
               data:{
-                action:'openActiveAudio',
+                action:'playDynamicPpt',
               }
             }),
           "*");
@@ -337,6 +337,9 @@
           	save : true,
           }
           PubMsg(sendData);
+        }
+        fn.onMouseLocation = function(event){
+          // console.log(event);
         }
         /**
          * PPT帧切换时触发函数
