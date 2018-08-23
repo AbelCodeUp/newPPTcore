@@ -779,7 +779,7 @@ window.onload = function(){
                 var that = this;
                 var playbackState = that.playbackController.playbackState();
                 dynamicPptLog.log("canJumpToAnim 当前状态(playbackState and slideTransitionControllerState )：", playbackState, that.slideTransitionController.state(), that.jumpToAnimData ? JSON.stringify(that.jumpToAnimData) : that.jumpToAnimData);
-                console.error('playbackState--',playbackState);
+                // console.error('playbackState--',playbackState);
                 if (that.jumpToAnimData && /(playingSlide|pausedSlide|suspended|buffering)/g.test(playbackState) && that.slideTransitionController.state() !== 'playing') {
                 // BUG: 快速按前进后退时，PPTstatus一直为 buffEred 缓冲状态
                 // if (that.jumpToAnimData && that.slideTransitionController.state() !== 'playing') {
