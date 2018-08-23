@@ -19,7 +19,7 @@
     <input type="button" id="leaveRoom" onclick="leaveRoom()" value="leaveRoom"/>
     <br><lable style="color: #C5221F;">注：demo的通信机制使用拓课云的通信系统，您可以使用您的通信系统进行通信</lable><br>
     <hr>
-    <input type="text" name="" id="PPTUrl" placeholder="文件路径" value="https://192.168.1.131/upload/pptTest_3/newppt.html?control=true" style="width:500px" >
+    <input type="text" name="" id="PPTUrl" placeholder="文件路径" value="https://192.168.1.131/upload/videopage/newppt.html" style="width:500px" >
     <input type="text" name="" id="fileId" placeholder="文件ID" value="" style="width:100px" >
     <input type="button" id="openPPT" value="openPPT" />
     <input type="button" id="prevPage" value="上一页" />
@@ -28,13 +28,27 @@
     <input type="button" id="jumpPage" value="跳转到" />
     <input type="button" id="prevStep" value="上一帧" />
     <input type="button" id="nextStep" value="下一帧" />
-    <input type="button" id="sendPlayMsg" value="发送播放测试消息">
     <input type="button" id="closeAudio" value="关闭当前播放音频">
     <input type="button" id="openAudio" value="打开当前播放音频">
+    <br />
+    <span>x</span>
+    <input type="text" id="xnumber" name="" value="" style="width:40px">
+    <span>y</span>
+    <input type="text" id="ynumber" name="" value="" style="width:40px">
+    <span>图片地址</span>
+    <input type="text" id="picUrl" name="" value="" style="width:200px">
     <input type="button" id="setCursor" value="设置鼠标样式">
+
+    <span>鼠标在PPT的位置:</span>
+    <span>x</span>
+    <input type="text" id="sX" disabled name="" value="" style="width:40px">
+    <span>y</span>
+    <input type="text" id="sY" disabled name="" value="" style="width:40px">
+
 </div>
 <div id="FrameBox"></div>
 <script type="text/javascript">
+
     function theElement(id) {
         return document.getElementById(id);
     }
@@ -46,10 +60,19 @@
     var _roomPassword = '';
 
     var _room = TK.Room();  // 房间管理对象
+
     var _isDebugLog = false; //是否是debug级别日志
     var fn = null; //PPT初始化
     var PPTUrl = $('#PPTUrl'); //PPT地址输入框
     var fileId = $('#fileId'); //文件ID输入框
+
+    document.getElementById('joinRoom').style.display = 'none';
+    _room.init('82AUScqguvqXzhUh',function () {
+        document.getElementById('joinRoom').style.display = 'inline-block';
+
+    },function (err) {
+        TK.Logger.error("Room initialization failed. Please check. error:" + err);
+    });
 
     _room.setLogIsDebug(_isDebugLog);
     //ppt 同步,接收信令消息
@@ -253,17 +276,6 @@
             }),
           "*");
         })
-
-        $('#sendPlayMsg').click(function(){
-          window.frames[0].postMessage(
-            JSON.stringify({
-              source:'tk_dynamicPPT',
-              data:{
-                action:'userTriggerAudio',
-              }
-            }),
-          "*");
-        })
         //PPT
         fn = new PPTMiddleWare('FrameBox');
 
@@ -315,7 +327,10 @@
         });
 
         $('#setCursor').click(function(){
-          fn.setCursor('https://192.168.1.131/cur/pencli.cur',10,10);
+          var x = $('#xnumber').val() || 10;
+          var y = $('#ynumber').val() || 10;
+          var pic = $('#picUrl').val() || location.origin + '/Public/cur/pencli.cur';
+          fn.setCursor(pic,x,y);
         })
 
         /**
@@ -339,6 +354,10 @@
           PubMsg(sendData);
         }
         fn.onMouseLocation = function(event){
+          var sX = $('#sX');
+          var sY = $('#sY');
+          sX.val(event.clientX);
+          sY.val(event.clientY);
           // console.log(event);
         }
         /**
